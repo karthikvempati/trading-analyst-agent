@@ -701,6 +701,12 @@ def chart_payload(ticker: str, period: str = "9mo") -> dict[str, Any]:
     ema50 = indicator_series(close_window, 50)
     ad_line = accumulation_distribution(hist)[-520:]
     cmf20 = chaikin_money_flow(hist)[-520:]
+    support = min(hist["lows"][-20:])
+    resistance = max(hist["highs"][-20:])
+    prior_lows = hist["lows"][-60:-20]
+    prior_highs = hist["highs"][-60:-20]
+    secondary_support = min(prior_lows) if prior_lows else None
+    secondary_resistance = max(prior_highs) if prior_highs else None
     rsi_value = rsi(closes)
     latest = closes[-1]
     trend = "above" if ema20[-1] is not None and latest > ema20[-1] else "below"
@@ -711,9 +717,14 @@ def chart_payload(ticker: str, period: str = "9mo") -> dict[str, Any]:
                if rsi_value is not None else
                f"{ticker} is trading {trend} its 20-day EMA. RSI is unavailable from the current history.")
     insight += f" CMF20 indicates {flow}."
+    levels = {"best_entry": support, "entry_trigger": resistance,
+              "support": support, "resistance": resistance,
+              "secondary_support": secondary_support,
+              "secondary_resistance": secondary_resistance,
+              "method": "Best entry is the primary support retest; entry trigger is a breakout above primary resistance."}
     return {"ticker": ticker, "candles": candles, "ema20": ema20, "ema50": ema50,
             "ad_line": ad_line, "cmf20": cmf20, "rsi": rsi_value,
-            "insight": insight, "as_of": now_iso()}
+            "levels": levels, "insight": insight, "as_of": now_iso()}
 
 
 # ---------------------------------------------------------------------------

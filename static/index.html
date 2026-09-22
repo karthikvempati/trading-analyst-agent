@@ -103,7 +103,8 @@ function drawChart(data) {
   const chartW = width - pad.left - pad.right, priceH = height * .58 - pad.top;
   const flowTop = pad.top + priceH + 28, flowH = height - flowTop - pad.bottom;
   const prices = candles.flatMap(c => [c.highs, c.lows]);
-  const max = Math.max(...prices), min = Math.min(...prices), range = max - min || 1;
+  const levelValues = Object.values(data.levels || {}).filter(value => typeof value === "number");
+  const max = Math.max(...prices, ...levelValues), min = Math.min(...prices, ...levelValues), range = max - min || 1;
   const x = i => pad.left + (i / Math.max(1, candles.length - 1)) * chartW;
   const y = value => pad.top + (max - value) / range * priceH;
   ctx.clearRect(0, 0, width, height); ctx.font = "11px sans-serif";
@@ -122,6 +123,18 @@ function drawChart(data) {
   function line(values, color) { ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath(); let started = false;
     values.forEach((value, i) => { if (value == null) return; if (!started) { ctx.moveTo(x(i), y(value)); started = true; } else ctx.lineTo(x(i), y(value)); }); ctx.stroke(); }
   line(data.ema20, "#e0a83c"); line(data.ema50, "#6da8ff");
+  const levels = [
+    ["Best entry / support", data.levels?.best_entry, "#55d6be"],
+    ["Resistance / trigger", data.levels?.entry_trigger, "#e0a83c"],
+    ["Secondary support", data.levels?.secondary_support, "#2fbf71"],
+    ["Secondary resistance", data.levels?.secondary_resistance, "#e05252"],
+  ];
+  levels.forEach(([label, value, color]) => {
+    if (typeof value !== "number") return;
+    const levelY = y(value); ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(pad.left, levelY); ctx.lineTo(width - pad.right, levelY); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = color; ctx.fillText(`${label} $${value.toFixed(2)}`, Math.max(pad.left, width - 150), levelY - 3);
+  });
   ctx.strokeStyle = "#2a3550"; ctx.beginPath(); ctx.moveTo(pad.left, flowTop); ctx.lineTo(width - pad.right, flowTop); ctx.stroke();
   const maxVolume = Math.max(...candles.map(c => c.volumes || 0), 1);
   candles.forEach((c, i) => { const barH = (c.volumes || 0) / maxVolume * flowH * .35; ctx.fillStyle = "rgba(154,166,189,.22)"; ctx.fillRect(x(i) - candleW / 2, flowTop + flowH - barH, candleW, barH); });
@@ -161,7 +174,9 @@ async function chartCard(ticker) {
   const period = document.getElementById("chartPeriod")?.value || "9mo";
   const r = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}`), d = await r.json();
   if (!r.ok) throw new Error(d.detail || "Chart data unavailable.");
-  return `<div class="card sec"><div class="chart-toolbar"><h3>${esc(ticker)} candlestick chart</h3><div class="chart-tools"><button id="zoomOut" title="Zoom out">−</button><button id="zoomIn" title="Zoom in">+</button><button id="zoomReset" title="Reset zoom">↺</button><select id="chartPeriod"><option value="3mo" ${period === "3mo" ? "selected" : ""}>3 months</option><option value="6mo" ${period === "6mo" ? "selected" : ""}>6 months</option><option value="9mo" ${period === "9mo" ? "selected" : ""}>9 months</option><option value="1y" ${period === "1y" ? "selected" : ""}>1 year</option><option value="2y" ${period === "2y" ? "selected" : ""}>2 years</option></select></div></div><div class="legend"><span style="color:#e0a83c">EMA20</span> · <span style="color:#6da8ff">EMA50</span> · <span style="color:#55d6be">A/D line</span> · <span style="color:#e0a83c">CMF20</span> · RSI ${d.rsi == null ? "n/a" : d.rsi.toFixed(0)}</div><div class="chart-wrap"><canvas id="priceChart"></canvas><div id="candleTooltip" class="candle-tooltip" role="status"></div></div><div class="meta">Click a candle for details · Scroll to zoom; drag to pan. · ${esc(d.insight)} · ${esc(d.as_of)}</div></div>`;
+  const levels = d.levels || {};
+  const levelText = `Best entry/support $${Number(levels.best_entry).toFixed(2)} · resistance/trigger $${Number(levels.entry_trigger).toFixed(2)} · secondary support $${Number(levels.secondary_support).toFixed(2)} · secondary resistance $${Number(levels.secondary_resistance).toFixed(2)}`;
+  return `<div class="card sec"><div class="chart-toolbar"><h3>${esc(ticker)} candlestick chart</h3><div class="chart-tools"><button id="zoomOut" title="Zoom out">−</button><button id="zoomIn" title="Zoom in">+</button><button id="zoomReset" title="Reset zoom">↺</button><select id="chartPeriod"><option value="3mo" ${period === "3mo" ? "selected" : ""}>3 months</option><option value="6mo" ${period === "6mo" ? "selected" : ""}>6 months</option><option value="9mo" ${period === "9mo" ? "selected" : ""}>9 months</option><option value="1y" ${period === "1y" ? "selected" : ""}>1 year</option><option value="2y" ${period === "2y" ? "selected" : ""}>2 years</option></select></div></div><div class="legend"><span style="color:#e0a83c">EMA20</span> · <span style="color:#6da8ff">EMA50</span> · <span style="color:#55d6be">A/D line</span> · <span style="color:#e0a83c">CMF20</span> · RSI ${d.rsi == null ? "n/a" : d.rsi.toFixed(0)}</div><div class="chart-wrap"><canvas id="priceChart"></canvas><div id="candleTooltip" class="candle-tooltip" role="status"></div></div><div class="meta">${esc(levelText)} · Click a candle for details · Scroll to zoom; drag to pan. · ${esc(d.insight)} · ${esc(d.as_of)}</div></div>`;
 }
 
 async function run() {
