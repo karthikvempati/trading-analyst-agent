@@ -837,7 +837,8 @@ def chart_payload(ticker: str, period: str = "3mo", interval: str = "4h") -> dic
         ad_line = ad_line[-view_bars:]
         cmf20 = cmf20[-view_bars:]
         phases = phases[-view_bars:]
-    levels = {"best_entry": support, "entry_trigger": resistance,
+    levels = {"buy_entry": support, "sell_entry": resistance,
+              "best_entry": support, "entry_trigger": resistance,
               "support": support, "resistance": resistance,
               "secondary_support": secondary_support,
               "secondary_resistance": secondary_resistance,

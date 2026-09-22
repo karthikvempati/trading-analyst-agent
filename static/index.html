@@ -132,8 +132,8 @@ function drawChart(data) {
     values.forEach((value, i) => { if (value == null) return; if (!started) { ctx.moveTo(x(i), y(value)); started = true; } else ctx.lineTo(x(i), y(value)); }); ctx.stroke(); }
   line(data.ema20, "#e0a83c"); line(data.ema50, "#6da8ff");
   const levels = [
-    ["Best entry / support", data.levels?.best_entry, "#55d6be"],
-    ["Resistance / trigger", data.levels?.entry_trigger, "#e0a83c"],
+    ["BUY ENTRY", data.levels?.buy_entry ?? data.levels?.best_entry, "#55d6be"],
+    ["SELL ENTRY", data.levels?.sell_entry ?? data.levels?.entry_trigger, "#e05252"],
     ["Secondary support", data.levels?.secondary_support, "#2fbf71"],
     ["Secondary resistance", data.levels?.secondary_resistance, "#e05252"],
   ];
@@ -184,7 +184,7 @@ async function chartCard(ticker, selectedPeriod = "3mo", selectedInterval = "4h"
   const r = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&interval=${interval}`), d = await r.json();
   if (!r.ok) throw new Error(d.detail || "Chart data unavailable.");
   const levels = d.levels || {};
-  const levelText = `Best entry/support $${Number(levels.best_entry).toFixed(2)} · resistance/trigger $${Number(levels.entry_trigger).toFixed(2)} · secondary support $${Number(levels.secondary_support).toFixed(2)} · secondary resistance $${Number(levels.secondary_resistance).toFixed(2)}`;
+  const levelText = `BUY ENTRY $${Number(levels.buy_entry ?? levels.best_entry).toFixed(2)} · SELL ENTRY $${Number(levels.sell_entry ?? levels.entry_trigger).toFixed(2)} · secondary support $${Number(levels.secondary_support).toFixed(2)} · secondary resistance $${Number(levels.secondary_resistance).toFixed(2)}`;
   return `<div class="card sec">
     <div class="chart-toolbar"><h3>${esc(ticker)} candlestick chart</h3><div class="chart-tools">
       <button id="zoomOut" title="Zoom out">−</button><button id="zoomIn" title="Zoom in">+</button><button id="zoomReset" title="Reset zoom">↺</button>
