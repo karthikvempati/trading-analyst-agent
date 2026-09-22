@@ -158,17 +158,32 @@ def _finite(x: Any) -> Optional[float]:
     return f if math.isfinite(f) else None
 
 
-def daily_history(ticker: str, period: str = "9mo") -> Optional[dict[str, Any]]:
+def daily_history(ticker: str, period: str = "9mo", interval: str = "1d") -> Optional[dict[str, Any]]:
     """Return aligned OHLCV data as plain lists, or None on failure."""
     try:
-        df = _ticker(ticker).history(period=period, auto_adjust=False)
+        source_interval = "1h" if interval == "4h" else interval
+        df = _ticker(ticker).history(period=period, interval=source_interval, auto_adjust=False)
         if df is None or df.empty:
             return None
         # Drop incomplete rows so chart candles and indicators stay aligned.
-        rows = [(o, h, l, c, v, str(date.date())) for date, o, h, l, c, v in zip(
+        rows = [(o, h, l, c, v, str(date)) for date, o, h, l, c, v in zip(
             df.index, df["Open"].tolist(), df["High"].tolist(),
             df["Low"].tolist(), df["Close"].tolist(), df["Volume"].tolist())
             if all(_finite(value) is not None for value in (o, h, l, c, v))]
+        if interval == "4h":
+            grouped = []
+            days = {}
+            for row in rows:
+                days.setdefault(row[-1].split(" ")[0], []).append(row)
+            for day_rows in days.values():
+                for start in range(0, len(day_rows), 4):
+                    chunk = day_rows[start:start + 4]
+                    if len(chunk) < 4:
+                        continue
+                    grouped.append((chunk[0][0], max(row[1] for row in chunk),
+                                    min(row[2] for row in chunk), chunk[-1][3],
+                                    sum(row[4] for row in chunk), chunk[-1][5]))
+            rows = grouped
         if len(rows) < 30:
             return None
         closes = [float(c) for _, _, _, c, _, _ in rows]
@@ -682,11 +697,52 @@ def chaikin_money_flow(hist: dict[str, Any], window: int = 20) -> list[Optional[
     return result
 
 
-def chart_payload(ticker: str, period: str = "9mo") -> dict[str, Any]:
+def market_phases(closes: list[float], ema20: list[Optional[float]],
+                  ema50: list[Optional[float]], ad_line: list[float],
+                  cmf20: list[Optional[float]]) -> list[str]:
+    """Classify each bar from trend structure and volume-flow confirmation."""
+    phases = []
+    for index, close in enumerate(closes):
+        if index < 20 or ema20[index] is None or ema50[index] is None or cmf20[index] is None:
+            phases.append("Insufficient data")
+            continue
+        price_change = close - closes[index - 20]
+        ad_change = ad_line[index] - ad_line[max(0, index - 5)]
+        trending_up = close > ema20[index] > ema50[index] and price_change > 0
+        trending_down = close < ema20[index] < ema50[index] and price_change < 0
+        if trending_up:
+            phases.append("Markup")
+        elif trending_down:
+            phases.append("Markdown")
+        elif ad_change > 0 and cmf20[index] > 0:
+            phases.append("Accumulation")
+        elif ad_change < 0 and cmf20[index] < 0:
+            phases.append("Distribution")
+        else:
+            phases.append("Transition")
+    return phases
+
+
+def chart_payload(ticker: str, period: str = "3mo", interval: str = "4h") -> dict[str, Any]:
     ticker = ticker.strip().upper()
     if not ticker or not ticker.replace(".", "").replace("-", "").isalnum():
         raise HTTPException(status_code=400, detail="Invalid ticker")
-    hist = daily_history(ticker, period)
+    requested_period = period
+    view_days = {"1d": 1, "5d": 5, "7d": 7, "10d": 10, "1mo": 22,
+                 "3mo": 66, "6mo": 132, "9mo": 198, "1y": 252, "2y": 520}
+    bars_per_day = {"1m": 390, "5m": 78, "15m": 26, "30m": 13, "1h": 7, "4h": 2, "1d": 1}[interval]
+    view_bars = min(3000, view_days[period] * bars_per_day)
+    if interval == "1m":
+        source_period = "7d"
+    elif interval in ("5m", "15m", "30m"):
+        source_period = "60d"
+    elif interval in ("1h", "4h"):
+        source_period = "1y"
+    elif period in ("1d", "5d", "10d", "1mo"):
+        source_period = "3mo"
+    else:
+        source_period = period
+    hist = daily_history(ticker, source_period, interval)
     if hist is None:
         raise HTTPException(status_code=404, detail="Price history unavailable")
     closes = hist["closes"]
@@ -694,13 +750,15 @@ def chart_payload(ticker: str, period: str = "9mo") -> dict[str, Any]:
         {key: hist[key][index] for key in ("dates", "opens", "highs", "lows", "closes", "volumes")}
         for index in range(len(closes))
     ]
-    # Keep enough daily bars for the longest selectable timeframe; zooming is client-side.
-    candles = candles[-520:]
-    close_window = closes[-520:]
+    # Keep enough history for the selected view and indicator lookbacks.
+    history_bars = min(len(closes), max(520, view_bars))
+    candles = candles[-history_bars:]
+    close_window = closes[-history_bars:]
     ema20 = indicator_series(close_window, 20)
     ema50 = indicator_series(close_window, 50)
-    ad_line = accumulation_distribution(hist)[-520:]
-    cmf20 = chaikin_money_flow(hist)[-520:]
+    ad_line = accumulation_distribution(hist)[-history_bars:]
+    cmf20 = chaikin_money_flow(hist)[-history_bars:]
+    phases = market_phases(close_window, ema20, ema50, ad_line, cmf20)
     support = min(hist["lows"][-20:])
     resistance = max(hist["highs"][-20:])
     prior_lows = hist["lows"][-60:-20]
@@ -713,18 +771,26 @@ def chart_payload(ticker: str, period: str = "9mo") -> dict[str, Any]:
     cmf_value = cmf20[-1]
     flow = "buying pressure" if cmf_value is not None and cmf_value > 0 else "selling pressure"
     insight = (f"{ticker} is trading {trend} its 20-day EMA; RSI is "
-               f"{rsi_value:.0f}. Candles and volume use daily Yahoo Finance data." 
+               f"{rsi_value:.0f}. Candles and volume use {interval} Yahoo Finance data." 
                if rsi_value is not None else
-               f"{ticker} is trading {trend} its 20-day EMA. RSI is unavailable from the current history.")
+               f"{ticker} is trading {trend} its 20-day EMA. RSI is unavailable from the current {interval} history.")
     insight += f" CMF20 indicates {flow}."
+    if view_bars < len(candles):
+        candles = candles[-view_bars:]
+        ema20 = ema20[-view_bars:]
+        ema50 = ema50[-view_bars:]
+        ad_line = ad_line[-view_bars:]
+        cmf20 = cmf20[-view_bars:]
+        phases = phases[-view_bars:]
     levels = {"best_entry": support, "entry_trigger": resistance,
               "support": support, "resistance": resistance,
               "secondary_support": secondary_support,
               "secondary_resistance": secondary_resistance,
               "method": "Best entry is the primary support retest; entry trigger is a breakout above primary resistance."}
-    return {"ticker": ticker, "candles": candles, "ema20": ema20, "ema50": ema50,
+    return {"ticker": ticker, "period": requested_period, "source_period": source_period, "interval": interval,
+            "candles": candles, "ema20": ema20, "ema50": ema50,
             "ad_line": ad_line, "cmf20": cmf20, "rsi": rsi_value,
-            "levels": levels, "insight": insight, "as_of": now_iso()}
+            "phases": phases, "levels": levels, "insight": insight, "as_of": now_iso()}
 
 
 # ---------------------------------------------------------------------------
@@ -765,10 +831,12 @@ def api_analyze(
 
 
 @app.get("/api/chart")
-def api_chart(ticker: str = Query(...), period: str = Query("9mo")):
-    if period not in ("3mo", "6mo", "9mo", "1y", "2y"):
-        raise HTTPException(status_code=400, detail="period must be 3mo, 6mo, 9mo, 1y, or 2y")
-    return _json_safe(chart_payload(ticker, period))
+def api_chart(ticker: str = Query(...), period: str = Query("3mo"), interval: str = Query("4h")):
+    if period not in ("1d", "5d", "7d", "10d", "1mo", "3mo", "6mo", "9mo", "1y", "2y"):
+        raise HTTPException(status_code=400, detail="invalid chart period")
+    if interval not in ("1m", "5m", "15m", "30m", "1h", "4h", "1d"):
+        raise HTTPException(status_code=400, detail="interval must be 1m, 5m, 15m, 30m, 1h, 4h, or 1d")
+    return _json_safe(chart_payload(ticker, period, interval))
 
 
 @app.get("/api/health")

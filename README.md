@@ -168,4 +168,6 @@ The web UI also includes an interactive daily candlestick chart with EMA20,
 EMA50, volume, RSI, the Chaikin Accumulation/Distribution Line, and 20-day
 Chaikin Money Flow. Select `3mo`, `6mo`, `9mo`, `1y`, or `2y`; use the chart
 controls or mouse wheel to zoom and drag to pan. Chart data is available at
-`GET /api/chart?ticker=ADBE&period=9mo`.
+`GET /api/chart?ticker=ADBE&period=9mo&interval=1d`. The chart also supports
+`1m`, `5m`, `15m`, `30m`, `1h`, and synthesized `4h` intervals; Yahoo Finance
+limits the available lookback for intraday intervals automatically.
