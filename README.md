@@ -163,3 +163,9 @@ Response JSON: `verdict` (GO/CAUTION/NO-GO), `verdict_headline`,
 `regime`, `technicals`, `valuation`, `catalysts`, `mode_evaluation`
 (+ `metrics` for CSP), `risk` (blockers/warnings), all with `as_of`
 timestamps. `GET /api/health` → `{"ok": true}`.
+
+The web UI also includes an interactive daily candlestick chart with EMA20,
+EMA50, volume, RSI, the Chaikin Accumulation/Distribution Line, and 20-day
+Chaikin Money Flow. Select `3mo`, `6mo`, `9mo`, `1y`, or `2y`; use the chart
+controls or mouse wheel to zoom and drag to pan. Chart data is available at
+`GET /api/chart?ticker=ADBE&period=9mo`.

@@ -30,6 +30,18 @@
   ul { margin:6px 0; padding-left:20px; font-size:0.9rem; }
   li { margin:3px 0; }
   .foot { text-align:center; color:var(--dim); font-size:0.72rem; margin:22px 0; }
+  .chart-wrap { position:relative; width:100%; height:430px; margin-top:10px; }
+  .chart-wrap canvas { width:100%; height:100%; display:block; }
+  .chart-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .chart-toolbar select { width:auto; padding:7px 9px; font-size:.85rem; }
+  .chart-tools { display:flex; gap:4px; align-items:center; }
+  .chart-tools button { width:30px; height:30px; padding:0; border:1px solid var(--line); border-radius:6px; background:#0c1220; color:var(--ink); font-size:1.1rem; }
+  .legend { color:var(--dim); font-size:.76rem; }
+  .candle-detail { margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:8px; background:#0c1220; color:var(--dim); font-size:.82rem; line-height:1.5; }
+  .candle-detail strong { color:var(--ink); }
+  .candle-tooltip { position:absolute; z-index:3; display:none; max-width:255px; padding:9px 10px; border:1px solid #4b6590; border-radius:7px; background:rgba(12,18,32,.96); box-shadow:0 8px 20px rgba(0,0,0,.28); color:var(--dim); font-size:.76rem; line-height:1.45; pointer-events:none; }
+  .candle-tooltip strong { color:var(--ink); }
+  #priceChart { cursor:crosshair; }
 </style>
 </head>
 <body>
@@ -78,6 +90,80 @@ function list(title, items) {
 }
 function esc(s){ return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
 
+let activeChartData = null, chartStart = 0, chartEnd = 0, chartDragX = null;
+
+function drawChart(data) {
+  const canvas = document.getElementById("priceChart"), box = canvas.parentElement;
+  const ratio = window.devicePixelRatio || 1, width = box.clientWidth, height = box.clientHeight;
+  canvas.width = width * ratio; canvas.height = height * ratio;
+  const ctx = canvas.getContext("2d"); ctx.scale(ratio, ratio);
+  activeChartData = data;
+  if (!chartEnd || chartEnd > data.candles.length) { chartStart = 0; chartEnd = data.candles.length; }
+  const candles = data.candles.slice(chartStart, chartEnd), pad = {left:44, right:8, top:12, bottom:28};
+  const chartW = width - pad.left - pad.right, priceH = height * .58 - pad.top;
+  const flowTop = pad.top + priceH + 28, flowH = height - flowTop - pad.bottom;
+  const prices = candles.flatMap(c => [c.highs, c.lows]);
+  const max = Math.max(...prices), min = Math.min(...prices), range = max - min || 1;
+  const x = i => pad.left + (i / Math.max(1, candles.length - 1)) * chartW;
+  const y = value => pad.top + (max - value) / range * priceH;
+  ctx.clearRect(0, 0, width, height); ctx.font = "11px sans-serif";
+  ctx.strokeStyle = "#2a3550"; ctx.fillStyle = "#9aa6bd"; ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) {
+    const gy = pad.top + i * priceH / 3; ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(width - pad.right, gy); ctx.stroke();
+    ctx.fillText((max - i * range / 3).toFixed(2), 3, gy + 4);
+  }
+  const step = chartW / Math.max(1, candles.length - 1), candleW = Math.max(2, Math.min(9, step * .62));
+  candles.forEach((c, i) => {
+    const rising = c.closes >= c.opens, color = rising ? "#2fbf71" : "#e05252", cx = x(i);
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(cx, y(c.highs)); ctx.lineTo(cx, y(c.lows)); ctx.stroke();
+    const top = y(Math.max(c.opens, c.closes)), bottom = y(Math.min(c.opens, c.closes));
+    ctx.fillRect(cx - candleW / 2, top, candleW, Math.max(1, bottom - top));
+  });
+  function line(values, color) { ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath(); let started = false;
+    values.forEach((value, i) => { if (value == null) return; if (!started) { ctx.moveTo(x(i), y(value)); started = true; } else ctx.lineTo(x(i), y(value)); }); ctx.stroke(); }
+  line(data.ema20, "#e0a83c"); line(data.ema50, "#6da8ff");
+  ctx.strokeStyle = "#2a3550"; ctx.beginPath(); ctx.moveTo(pad.left, flowTop); ctx.lineTo(width - pad.right, flowTop); ctx.stroke();
+  const maxVolume = Math.max(...candles.map(c => c.volumes || 0), 1);
+  candles.forEach((c, i) => { const barH = (c.volumes || 0) / maxVolume * flowH * .35; ctx.fillStyle = "rgba(154,166,189,.22)"; ctx.fillRect(x(i) - candleW / 2, flowTop + flowH - barH, candleW, barH); });
+  const ad = data.ad_line.slice(chartStart, chartEnd), adMin = Math.min(...ad), adMax = Math.max(...ad), adRange = adMax - adMin || 1;
+  const cmf = data.cmf20.slice(chartStart, chartEnd);
+  function flowY(value, low, high) { return flowTop + (high - value) / (high - low || 1) * flowH; }
+  ctx.strokeStyle = "#55d6be"; ctx.lineWidth = 1.5; ctx.beginPath();
+  ad.forEach((value, i) => { const pointY = flowY(value, adMin, adMax); if (!i) ctx.moveTo(x(i), pointY); else ctx.lineTo(x(i), pointY); }); ctx.stroke();
+  ctx.strokeStyle = "#e0a83c"; ctx.beginPath(); let cmfStarted = false;
+  cmf.forEach((value, i) => { if (value == null) return; const pointY = flowY(value, -1, 1); if (!cmfStarted) { ctx.moveTo(x(i), pointY); cmfStarted = true; } else ctx.lineTo(x(i), pointY); }); ctx.stroke();
+  ctx.strokeStyle = "rgba(224,168,60,.45)"; ctx.beginPath(); ctx.moveTo(pad.left, flowY(0, -1, 1)); ctx.lineTo(width - pad.right, flowY(0, -1, 1)); ctx.stroke();
+  ctx.fillStyle = "#9aa6bd"; ctx.fillText("A/D", pad.left, flowTop + 12); ctx.fillText("CMF", pad.left + 30, flowTop + 12);
+  ctx.fillText(candles[0].dates, pad.left, height - 8); ctx.fillText(candles[candles.length - 1].dates, width - 76, height - 8);
+  const tooltip = document.getElementById("candleTooltip");
+  const tooltipHtml = candle => {
+    const index = data.candles.indexOf(candle), previous = data.candles[index - 1];
+    const change = previous ? (candle.closes - previous.closes) / previous.closes * 100 : null;
+    const fmt = value => value == null ? "n/a" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 2});
+    return `<strong>${esc(candle.dates)}</strong> · ${candle.closes >= candle.opens ? "up" : "down"}${change == null ? "" : ` ${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}<br>O <strong>$${fmt(candle.opens)}</strong> · H <strong>$${fmt(candle.highs)}</strong> · L <strong>$${fmt(candle.lows)}</strong> · C <strong>$${fmt(candle.closes)}</strong><br>Range <strong>$${fmt(candle.highs - candle.lows)}</strong> · Vol <strong>${fmt(candle.volumes)}</strong><br>EMA20 <strong>${fmt(data.ema20[index])}</strong> · EMA50 <strong>${fmt(data.ema50[index])}</strong><br>A/D <strong>${fmt(data.ad_line[index])}</strong> · CMF20 <strong>${fmt(data.cmf20[index])}</strong>`;
+  };
+  const showTooltip = e => {
+    if (!tooltip) return;
+    const rect = canvas.getBoundingClientRect(), point = Math.max(0, Math.min(candles.length - 1, Math.round((e.clientX - rect.left - pad.left) / chartW * Math.max(1, candles.length - 1))));
+    tooltip.innerHTML = tooltipHtml(candles[point]); tooltip.style.display = "block";
+    const wrap = canvas.parentElement, wrapRect = wrap.getBoundingClientRect();
+    tooltip.style.left = `${Math.min(wrap.clientWidth - tooltip.offsetWidth - 6, Math.max(6, e.clientX - wrapRect.left + 12))}px`;
+    tooltip.style.top = `${-tooltip.offsetHeight - 6}px`;
+  };
+  canvas.onclick = e => { if (chartDragX == null) showTooltip(e); };
+  canvas.onwheel = e => { e.preventDefault(); const span = chartEnd - chartStart; const next = Math.max(30, Math.min(data.candles.length, Math.round(span * (e.deltaY < 0 ? .8 : 1.25)))); const center = chartStart + span / 2; chartStart = Math.max(0, Math.min(data.candles.length - next, Math.round(center - next / 2))); chartEnd = chartStart + next; drawChart(data); };
+  canvas.onpointerdown = e => { chartDragX = e.clientX; canvas.setPointerCapture(e.pointerId); };
+  canvas.onpointermove = e => { if (chartDragX == null) return; const shift = Math.round((chartDragX - e.clientX) / Math.max(1, chartW) * (chartEnd - chartStart)); if (Math.abs(shift) > 0) { const span = chartEnd - chartStart; chartStart = Math.max(0, Math.min(data.candles.length - span, chartStart + shift)); chartEnd = chartStart + span; chartDragX = e.clientX; drawChart(data); } };
+  canvas.onpointerup = () => { chartDragX = null; };
+}
+
+async function chartCard(ticker) {
+  const period = document.getElementById("chartPeriod")?.value || "9mo";
+  const r = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}`), d = await r.json();
+  if (!r.ok) throw new Error(d.detail || "Chart data unavailable.");
+  return `<div class="card sec"><div class="chart-toolbar"><h3>${esc(ticker)} candlestick chart</h3><div class="chart-tools"><button id="zoomOut" title="Zoom out">−</button><button id="zoomIn" title="Zoom in">+</button><button id="zoomReset" title="Reset zoom">↺</button><select id="chartPeriod"><option value="3mo" ${period === "3mo" ? "selected" : ""}>3 months</option><option value="6mo" ${period === "6mo" ? "selected" : ""}>6 months</option><option value="9mo" ${period === "9mo" ? "selected" : ""}>9 months</option><option value="1y" ${period === "1y" ? "selected" : ""}>1 year</option><option value="2y" ${period === "2y" ? "selected" : ""}>2 years</option></select></div></div><div class="legend"><span style="color:#e0a83c">EMA20</span> · <span style="color:#6da8ff">EMA50</span> · <span style="color:#55d6be">A/D line</span> · <span style="color:#e0a83c">CMF20</span> · RSI ${d.rsi == null ? "n/a" : d.rsi.toFixed(0)}</div><div class="chart-wrap"><canvas id="priceChart"></canvas><div id="candleTooltip" class="candle-tooltip" role="status"></div></div><div class="meta">Click a candle for details · Scroll to zoom; drag to pan. · ${esc(d.insight)} · ${esc(d.as_of)}</div></div>`;
+}
+
 async function run() {
   const out = document.getElementById("out");
   const ticker = document.getElementById("ticker").value.trim().toUpperCase();
@@ -96,6 +182,7 @@ async function run() {
     if (!r.ok) { out.innerHTML = `<div class="err">${esc(d.detail || "Analysis failed.")}</div>`; return; }
     const m = d.mode_evaluation || {}, rk = d.risk || {}, cspm = (m.metrics || {});
     let html = `<div class="verdict ${d.verdict}">${esc(d.verdict_headline)}</div>`;
+    try { html += await chartCard(ticker); } catch (e) { html += `<div class="err">Chart unavailable: ${esc(e.message)}</div>`; }
     if (d.company) html += `<div class="meta" style="text-align:center">${esc(d.company)}${d.sector ? " · " + esc(d.sector) : ""} · analyzed ${esc(d.as_of)}</div>`;
     html += sec("Market regime gate", esc(d.regime.summary));
     html += sec("Technicals", esc(d.technicals.summary), "as of " + esc(d.technicals.as_of));
@@ -113,6 +200,20 @@ async function run() {
     html += sec("Risk manager verdict", esc(rk.summary));
     html += `<div class="foot">${esc(d.data_note)}</div>`;
     out.innerHTML = html;
+    const chart = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${document.getElementById("chartPeriod")?.value || "9mo"}`).then(x => x.json());
+    if (chart.candles) {
+      drawChart(chart);
+      document.getElementById("zoomIn")?.addEventListener("click", () => {
+        const span = chartEnd - chartStart, next = Math.max(30, Math.round(span * .8)), center = chartStart + span / 2;
+        chartStart = Math.max(0, Math.min(chart.candles.length - next, Math.round(center - next / 2))); chartEnd = chartStart + next; drawChart(chart);
+      });
+      document.getElementById("zoomOut")?.addEventListener("click", () => {
+        const span = chartEnd - chartStart, next = Math.min(chart.candles.length, Math.round(span * 1.25)), center = chartStart + span / 2;
+        chartStart = Math.max(0, Math.min(chart.candles.length - next, Math.round(center - next / 2))); chartEnd = chartStart + next; drawChart(chart);
+      });
+      document.getElementById("zoomReset")?.addEventListener("click", () => { chartStart = 0; chartEnd = chart.candles.length; drawChart(chart); });
+    }
+    document.getElementById("chartPeriod")?.addEventListener("change", () => { chartStart = 0; chartEnd = 0; run(); });
     window.scrollTo({top:0, behavior:"smooth"});
   } catch (e) {
     out.innerHTML = `<div class="err">Network error: ${esc(e.message)}</div>`;

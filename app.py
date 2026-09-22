@@ -158,26 +158,28 @@ def _finite(x: Any) -> Optional[float]:
     return f if math.isfinite(f) else None
 
 
-def daily_history(ticker: str, period: str = "9mo") -> Optional[dict[str, list[float]]]:
-    """Return closes/highs/lows/volumes as plain lists, or None on failure."""
+def daily_history(ticker: str, period: str = "9mo") -> Optional[dict[str, Any]]:
+    """Return aligned OHLCV data as plain lists, or None on failure."""
     try:
         df = _ticker(ticker).history(period=period, auto_adjust=False)
         if df is None or df.empty:
             return None
-        # Drop rows with non-finite closes (holes, splits); keep OHLCV aligned.
-        rows = [(c, h, l, v) for c, h, l, v in zip(
-            df["Close"].tolist(), df["High"].tolist(),
-            df["Low"].tolist(), df["Volume"].tolist())
-            if _finite(c) is not None]
+        # Drop incomplete rows so chart candles and indicators stay aligned.
+        rows = [(o, h, l, c, v, str(date.date())) for date, o, h, l, c, v in zip(
+            df.index, df["Open"].tolist(), df["High"].tolist(),
+            df["Low"].tolist(), df["Close"].tolist(), df["Volume"].tolist())
+            if all(_finite(value) is not None for value in (o, h, l, c, v))]
         if len(rows) < 30:
             return None
-        closes = [float(c) for c, _, _, _ in rows]
+        closes = [float(c) for _, _, _, c, _, _ in rows]
         return {
             "closes": closes,
-            "highs": [float(h) for _, h, _, _ in rows],
-            "lows": [float(l) for _, _, l, _ in rows],
-            "volumes": [float(v) for _, _, _, v in rows],
-            "last_date": str(df.index[-1].date()),
+            "opens": [float(o) for o, _, _, _, _, _ in rows],
+            "highs": [float(h) for _, h, _, _, _, _ in rows],
+            "lows": [float(l) for _, _, l, _, _, _ in rows],
+            "volumes": [float(v) for _, _, _, _, v, _ in rows],
+            "dates": [date for _, _, _, _, _, date in rows],
+            "last_date": rows[-1][-1],
         }
     except Exception:
         return None
@@ -639,6 +641,81 @@ def analyze(ticker: str, mode: str, csp_terms: Optional[CspTerms]) -> dict[str, 
     }
 
 
+def indicator_series(values: list[float], window: int) -> list[Optional[float]]:
+    """Return an EMA for every point where its lookback is available."""
+    if len(values) < window:
+        return [None] * len(values)
+    k = 2 / (window + 1)
+    result: list[Optional[float]] = [None] * (window - 1)
+    current = sum(values[:window]) / window
+    result.append(current)
+    for value in values[window:]:
+        current = value * k + current * (1 - k)
+        result.append(current)
+    return result
+
+
+def accumulation_distribution(hist: dict[str, Any]) -> list[float]:
+    """Return the cumulative Chaikin Accumulation/Distribution Line."""
+    total = 0.0
+    result = []
+    for high, low, close, volume in zip(hist["highs"], hist["lows"], hist["closes"], hist["volumes"]):
+        spread = high - low
+        multiplier = 0.0 if spread == 0 else ((close - low) - (high - close)) / spread
+        total += multiplier * volume
+        result.append(total)
+    return result
+
+
+def chaikin_money_flow(hist: dict[str, Any], window: int = 20) -> list[Optional[float]]:
+    """Return CMF, measuring buying/selling pressure over a rolling window."""
+    flow = []
+    for high, low, close, volume in zip(hist["highs"], hist["lows"], hist["closes"], hist["volumes"]):
+        spread = high - low
+        multiplier = 0.0 if spread == 0 else ((close - low) - (high - close)) / spread
+        flow.append((multiplier * volume, volume))
+    result: list[Optional[float]] = [None] * len(flow)
+    for index in range(window - 1, len(flow)):
+        money_flow = sum(item[0] for item in flow[index - window + 1:index + 1])
+        volume = sum(item[1] for item in flow[index - window + 1:index + 1])
+        result[index] = money_flow / volume if volume else None
+    return result
+
+
+def chart_payload(ticker: str, period: str = "9mo") -> dict[str, Any]:
+    ticker = ticker.strip().upper()
+    if not ticker or not ticker.replace(".", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid ticker")
+    hist = daily_history(ticker, period)
+    if hist is None:
+        raise HTTPException(status_code=404, detail="Price history unavailable")
+    closes = hist["closes"]
+    candles = [
+        {key: hist[key][index] for key in ("dates", "opens", "highs", "lows", "closes", "volumes")}
+        for index in range(len(closes))
+    ]
+    # Keep enough daily bars for the longest selectable timeframe; zooming is client-side.
+    candles = candles[-520:]
+    close_window = closes[-520:]
+    ema20 = indicator_series(close_window, 20)
+    ema50 = indicator_series(close_window, 50)
+    ad_line = accumulation_distribution(hist)[-520:]
+    cmf20 = chaikin_money_flow(hist)[-520:]
+    rsi_value = rsi(closes)
+    latest = closes[-1]
+    trend = "above" if ema20[-1] is not None and latest > ema20[-1] else "below"
+    cmf_value = cmf20[-1]
+    flow = "buying pressure" if cmf_value is not None and cmf_value > 0 else "selling pressure"
+    insight = (f"{ticker} is trading {trend} its 20-day EMA; RSI is "
+               f"{rsi_value:.0f}. Candles and volume use daily Yahoo Finance data." 
+               if rsi_value is not None else
+               f"{ticker} is trading {trend} its 20-day EMA. RSI is unavailable from the current history.")
+    insight += f" CMF20 indicates {flow}."
+    return {"ticker": ticker, "candles": candles, "ema20": ema20, "ema50": ema50,
+            "ad_line": ad_line, "cmf20": cmf20, "rsi": rsi_value,
+            "insight": insight, "as_of": now_iso()}
+
+
 # ---------------------------------------------------------------------------
 # HTTP layer
 # ---------------------------------------------------------------------------
@@ -674,6 +751,13 @@ def api_analyze(
             raise HTTPException(status_code=400, detail="csp mode requires strike and credit")
         csp = CspTerms(strike=strike, credit=credit, delta=delta, iv=iv, dte=dte, contracts=contracts)
     return _json_safe(analyze(ticker, mode, csp))
+
+
+@app.get("/api/chart")
+def api_chart(ticker: str = Query(...), period: str = Query("9mo")):
+    if period not in ("3mo", "6mo", "9mo", "1y", "2y"):
+        raise HTTPException(status_code=400, detail="period must be 3mo, 6mo, 9mo, 1y, or 2y")
+    return _json_safe(chart_payload(ticker, period))
 
 
 @app.get("/api/health")
