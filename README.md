@@ -171,3 +171,8 @@ controls or mouse wheel to zoom and drag to pan. Chart data is available at
 `GET /api/chart?ticker=ADBE&period=9mo&interval=1d`. The chart also supports
 `1m`, `5m`, `15m`, `30m`, `1h`, and synthesized `4h` intervals; Yahoo Finance
 limits the available lookback for intraday intervals automatically.
+
+The results view includes a chart-grounded Q&A box. It answers questions about
+the latest candle, market phase, entry levels, support/resistance, RSI, EMA
+trend, CMF, and A/D using `POST /api/ask` with `ticker`, `question`, `period`,
+and `interval` fields.

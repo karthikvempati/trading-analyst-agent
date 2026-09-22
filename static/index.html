@@ -42,6 +42,10 @@
   .candle-tooltip { position:absolute; z-index:3; display:none; max-width:255px; padding:9px 10px; border:1px solid #4b6590; border-radius:7px; background:rgba(12,18,32,.96); box-shadow:0 8px 20px rgba(0,0,0,.28); color:var(--dim); font-size:.76rem; line-height:1.45; pointer-events:none; }
   .candle-tooltip strong { color:var(--ink); }
   #priceChart { cursor:crosshair; }
+  .ask-row { display:flex; gap:8px; margin-top:8px; }
+  .ask-row input { flex:1; min-width:0; }
+  .ask-row button { padding:0 16px; border:0; border-radius:9px; background:#2f6fd0; color:#fff; font-weight:700; }
+  .ask-answer { margin-top:10px; padding:10px; border-left:3px solid #6da8ff; background:#0c1220; color:var(--ink); line-height:1.5; }
 </style>
 </head>
 <body>
@@ -170,14 +174,39 @@ function drawChart(data) {
   canvas.onpointerup = () => { chartDragX = null; };
 }
 
-async function chartCard(ticker, selectedPeriod = "9mo", selectedInterval = "1d") {
+async function chartCard(ticker, selectedPeriod = "3mo", selectedInterval = "4h") {
   const period = selectedPeriod || "3mo";
   const interval = selectedInterval || "4h";
   const r = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&interval=${interval}`), d = await r.json();
   if (!r.ok) throw new Error(d.detail || "Chart data unavailable.");
   const levels = d.levels || {};
   const levelText = `Best entry/support $${Number(levels.best_entry).toFixed(2)} · resistance/trigger $${Number(levels.entry_trigger).toFixed(2)} · secondary support $${Number(levels.secondary_support).toFixed(2)} · secondary resistance $${Number(levels.secondary_resistance).toFixed(2)}`;
-  return `<div class="card sec"><div class="chart-toolbar"><h3>${esc(ticker)} candlestick chart</h3><div class="chart-tools"><button id="zoomOut" title="Zoom out">−</button><button id="zoomIn" title="Zoom in">+</button><button id="zoomReset" title="Reset zoom">↺</button><select id="chartInterval"><option value="1m" ${interval === "1m" ? "selected" : ""}>1 minute</option><option value="5m" ${interval === "5m" ? "selected" : ""}>5 minutes</option><option value="15m" ${interval === "15m" ? "selected" : ""}>15 minutes</option><option value="30m" ${interval === "30m" ? "selected" : ""}>30 minutes</option><option value="1h" ${interval === "1h" ? "selected" : ""}>1 hour</option><option value="1d" ${interval === "1d" ? "selected" : ""}>1 day</option></select><select id="chartPeriod"><option value="1d" ${period === "1d" ? "selected" : ""}>1 day</option><option value="5d" ${period === "5d" ? "selected" : ""}>5 days</option><option value="10d" ${period === "10d" ? "selected" : ""}>10 days</option><option value="1mo" ${period === "1mo" ? "selected" : ""}>1 month</option><option value="3mo" ${period === "3mo" ? "selected" : ""}>3 months</option><option value="6mo" ${period === "6mo" ? "selected" : ""}>6 months</option><option value="9mo" ${period === "9mo" ? "selected" : ""}>9 months</option><option value="1y" ${period === "1y" ? "selected" : ""}>1 year</option><option value="2y" ${period === "2y" ? "selected" : ""}>2 years</option></select></div></div><div class="legend"><span style="color:#e0a83c">EMA20</span> · <span style="color:#6da8ff">EMA50</span> · <span style="color:#55d6be">A/D line</span> · <span style="color:#e0a83c">CMF20</span> · RSI ${d.rsi == null ? "n/a" : d.rsi.toFixed(0)}</div><div class="chart-wrap"><canvas id="priceChart"></canvas><div id="candleTooltip" class="candle-tooltip" role="status"></div></div><div class="meta">${esc(levelText)} · ${esc(d.interval)} candles over ${esc(d.period)} · Click a candle for details · Scroll to zoom; drag to pan. · ${esc(d.insight)} · ${esc(d.as_of)}</div></div>`;
+  return `<div class="card sec">
+    <div class="chart-toolbar"><h3>${esc(ticker)} candlestick chart</h3><div class="chart-tools">
+      <button id="zoomOut" title="Zoom out">−</button><button id="zoomIn" title="Zoom in">+</button><button id="zoomReset" title="Reset zoom">↺</button>
+      <select id="chartInterval"><option value="1m" ${interval === "1m" ? "selected" : ""}>1 minute</option><option value="5m" ${interval === "5m" ? "selected" : ""}>5 minutes</option><option value="15m" ${interval === "15m" ? "selected" : ""}>15 minutes</option><option value="30m" ${interval === "30m" ? "selected" : ""}>30 minutes</option><option value="1h" ${interval === "1h" ? "selected" : ""}>1 hour</option><option value="4h" ${interval === "4h" ? "selected" : ""}>4 hours</option><option value="1d" ${interval === "1d" ? "selected" : ""}>1 day</option></select>
+      <select id="chartPeriod"><option value="1d" ${period === "1d" ? "selected" : ""}>1 day</option><option value="5d" ${period === "5d" ? "selected" : ""}>5 days</option><option value="10d" ${period === "10d" ? "selected" : ""}>10 days</option><option value="1mo" ${period === "1mo" ? "selected" : ""}>1 month</option><option value="3mo" ${period === "3mo" ? "selected" : ""}>3 months</option><option value="6mo" ${period === "6mo" ? "selected" : ""}>6 months</option><option value="9mo" ${period === "9mo" ? "selected" : ""}>9 months</option><option value="1y" ${period === "1y" ? "selected" : ""}>1 year</option><option value="2y" ${period === "2y" ? "selected" : ""}>2 years</option></select>
+    </div></div>
+    <div class="legend"><span style="color:#e0a83c">EMA20</span> · <span style="color:#6da8ff">EMA50</span> · <span style="color:#55d6be">A/D line</span> · <span style="color:#e0a83c">CMF20</span> · RSI ${d.rsi == null ? "n/a" : d.rsi.toFixed(0)}</div>
+    <div class="chart-wrap"><canvas id="priceChart"></canvas><div id="candleTooltip" class="candle-tooltip" role="status"></div></div>
+    <div class="meta">${esc(levelText)} · ${esc(d.interval)} candles over ${esc(d.period)} · Click a candle for details · Scroll to zoom; drag to pan. · ${esc(d.insight)} · ${esc(d.as_of)}</div>
+  </div>`;
+}
+
+function askCard(ticker) {
+  return `<div class="card sec"><h3>Ask about this chart</h3><div class="ask-row"><input id="chartQuestion" type="text" placeholder="e.g. What phase is the latest candle?" autocomplete="off"><button id="askButton">Ask</button></div><div id="askAnswer" class="ask-answer" role="status">Ask about phase, entry, support, resistance, RSI, trend, CMF, or the latest candle.</div></div>`;
+}
+
+async function askQuestion(ticker) {
+  const input = document.getElementById("chartQuestion"), answer = document.getElementById("askAnswer");
+  const question = input?.value.trim();
+  if (!question) { answer.textContent = "Type a question about the chart first."; return; }
+  answer.textContent = "Reading the current chart data…";
+  try {
+    const r = await fetch("/api/ask", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ticker, question, period:document.getElementById("chartPeriod")?.value || "3mo", interval:document.getElementById("chartInterval")?.value || "4h"})});
+    const d = await r.json();
+    answer.textContent = r.ok ? d.answer : (d.detail || "Could not answer that question.");
+  } catch (e) { answer.textContent = `Network error: ${e.message}`; }
 }
 
 async function run() {
@@ -218,10 +247,13 @@ async function run() {
     }
     html += list("Risk manager — fired checks", [...(rk.blockers||[]).map(b=>"⛔ "+b), ...(rk.warnings||[]).map(w=>"⚠️ "+w)]);
     html += sec("Risk manager verdict", esc(rk.summary));
+    html += askCard(ticker);
     html += `<div class="foot">${esc(d.data_note)}</div>`;
     out.innerHTML = html;
     document.getElementById("chartPeriod")?.addEventListener("change", () => { chartStart = 0; chartEnd = 0; run(); });
     document.getElementById("chartInterval")?.addEventListener("change", () => { chartStart = 0; chartEnd = 0; run(); });
+    document.getElementById("askButton")?.addEventListener("click", () => askQuestion(ticker));
+    document.getElementById("chartQuestion")?.addEventListener("keydown", e => { if (e.key === "Enter") askQuestion(ticker); });
     const chart = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${chartPeriod}&interval=${chartInterval}`).then(x => x.json());
     if (requestId !== runSequence) return;
     if (chart.candles) {

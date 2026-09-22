@@ -482,6 +482,61 @@ class CspTerms(BaseModel):
     contracts: int = 1
 
 
+class AskRequest(BaseModel):
+    ticker: str
+    question: str
+    period: str = "3mo"
+    interval: str = "4h"
+
+
+def answer_chart_question(request: AskRequest) -> dict[str, Any]:
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    chart = chart_payload(request.ticker, request.period, request.interval)
+    candles = chart["candles"]
+    latest = candles[-1]
+    index = len(candles) - 1
+    levels = chart["levels"]
+    phase = chart["phases"][index]
+    ema20 = chart["ema20"][index]
+    ema50 = chart["ema50"][index]
+    cmf = chart["cmf20"][index]
+    ad_line = chart["ad_line"][index]
+    lower = question.lower()
+
+    def money(value: Optional[float]) -> str:
+        return "unavailable" if value is None else f"${value:,.2f}"
+
+    if "phase" in lower or any(word in lower for word in ("accumulation", "distribution", "markup", "markdown")):
+        answer = (f"The latest {chart['interval']} candle ({latest['dates']}) is classified as {phase}. "
+                  f"The classification uses EMA trend structure, 20-bar price change, A/D direction, and CMF.")
+    elif "entry" in lower or "buy" in lower:
+        answer = (f"The chart's best pullback entry is the primary support retest at {money(levels['best_entry'])}. "
+                  f"The breakout confirmation level is {money(levels['entry_trigger'])}. "
+                  "These are technical reference levels, not a guarantee or personalized advice.")
+    elif "support" in lower or "resistance" in lower or "level" in lower:
+        answer = (f"Primary support is {money(levels['support'])} and primary resistance is {money(levels['resistance'])}. "
+                  f"Secondary support is {money(levels['secondary_support'])}; secondary resistance is {money(levels['secondary_resistance'])}.")
+    elif "rsi" in lower or "overbought" in lower or "oversold" in lower:
+        rsi_value = chart["rsi"]
+        answer = f"RSI is {rsi_value:.1f}. It is {'oversold' if rsi_value <= 30 else 'overbought' if rsi_value >= 70 else 'in the neutral band'} by the 30/70 screen." if rsi_value is not None else "RSI is unavailable for this view."
+    elif "cmf" in lower or "money flow" in lower or "buying pressure" in lower or "selling pressure" in lower:
+        answer = f"CMF20 is {cmf:.3f} and the latest phase is {phase}; this reads as {'buying' if cmf is not None and cmf > 0 else 'selling' if cmf is not None else 'unavailable'} pressure. A/D is {ad_line:,.0f}."
+    elif "ema" in lower or "trend" in lower or "direction" in lower:
+        relation = "above" if ema20 is not None and latest["closes"] > ema20 else "below"
+        stack = "bullish" if ema20 is not None and ema50 is not None and latest["closes"] > ema20 > ema50 else "bearish" if ema20 is not None and ema50 is not None and latest["closes"] < ema20 < ema50 else "mixed"
+        answer = f"The close is {relation} EMA20 ({money(ema20)}); EMA50 is {money(ema50)}. The current EMA structure is {stack}."
+    elif "candle" in lower or "open" in lower or "close" in lower or "volume" in lower:
+        answer = (f"The latest candle is {latest['dates']}: open {money(latest['opens'])}, high {money(latest['highs'])}, "
+                  f"low {money(latest['lows'])}, close {money(latest['closes'])}, volume {latest['volumes']:,.0f}.")
+    else:
+        answer = (f"{chart['ticker']} is at {money(latest['closes'])} on the latest {chart['interval']} candle, "
+                  f"classified as {phase}. Best pullback entry/support is {money(levels['best_entry'])}; "
+                  f"resistance/trigger is {money(levels['entry_trigger'])}. Ask about phase, entry, levels, RSI, trend, CMF, or the latest candle for a focused answer.")
+    return {"ticker": chart["ticker"], "question": question, "answer": answer, "as_of": chart["as_of"]}
+
+
 def evaluate_csp(ticker: str, tech: dict[str, Any], regime: dict[str, Any], t: CspTerms) -> dict[str, Any]:
     spot = tech["price"]
     if spot is None or spot <= 0:
@@ -837,6 +892,15 @@ def api_chart(ticker: str = Query(...), period: str = Query("3mo"), interval: st
     if interval not in ("1m", "5m", "15m", "30m", "1h", "4h", "1d"):
         raise HTTPException(status_code=400, detail="interval must be 1m, 5m, 15m, 30m, 1h, 4h, or 1d")
     return _json_safe(chart_payload(ticker, period, interval))
+
+
+@app.post("/api/ask")
+def api_ask(request: AskRequest):
+    if request.period not in ("1d", "5d", "7d", "10d", "1mo", "3mo", "6mo", "9mo", "1y", "2y"):
+        raise HTTPException(status_code=400, detail="invalid chart period")
+    if request.interval not in ("1m", "5m", "15m", "30m", "1h", "4h", "1d"):
+        raise HTTPException(status_code=400, detail="invalid chart interval")
+    return _json_safe(answer_chart_question(request))
 
 
 @app.get("/api/health")
