@@ -1,0 +1,19 @@
+# Caddy reverse-proxy example — auto HTTPS, no cert management needed.
+# 1) Point your domain's DNS A record at this server's public IP.
+# 2) Replace trading.example.com below with your domain.
+# 3) If you run Caddy on the same host as docker compose, save this file as
+#    /etc/caddy/Caddyfile (or pass it with `caddy run --config`) and reload Caddy.
+#
+# NOTE: the service name "trading-analyst" matches docker-compose.yml.
+# If Caddy runs on the same Docker network, use trading-analyst:8000.
+# If Caddy runs on the host, use localhost:8000 instead.
+
+trading.example.com {
+    # Optional basic auth (uncomment to require a login).
+    # Generate the hash with: caddy hash-password
+    # basicauth {
+    #     trader $2a$14$REPLACE_WITH_HASH_FROM_caddy_hash-password
+    # }
+
+    reverse_proxy trading-analyst:8000
+}

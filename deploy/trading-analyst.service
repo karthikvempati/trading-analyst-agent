@@ -1,0 +1,27 @@
+# systemd unit — non-Docker alternative. Runs uvicorn from a venv.
+# Install:
+#   1) Copy the code to /opt/trading-analyst (or anywhere you like).
+#   2) cd /opt/trading-analyst && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#   3) Edit the WorkingDirectory / ExecStart paths below to match your copy location
+#      and the user the service should run as.
+#   4) sudo cp trading-analyst.service /etc/systemd/system/
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable --now trading-analyst
+#      systemctl status trading-analyst
+
+[Unit]
+Description=Trading Analyst Agent (self-hosted)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/trading-analyst
+ExecStart=/opt/trading-analyst/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

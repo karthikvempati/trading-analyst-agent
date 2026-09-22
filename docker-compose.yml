@@ -1,0 +1,9 @@
+services:
+  trading-analyst:
+    build: .
+    container_name: trading-analyst
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # Optional: HTTP basic auth via Caddy instead (see deploy/Caddyfile.example).
+    # No database, no volumes — the app is stateless.

@@ -1,0 +1,4 @@
+# Pinned 2026-09-21. Python 3.11+ required.
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+yfinance==0.2.66
