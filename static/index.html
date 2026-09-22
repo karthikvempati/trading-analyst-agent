@@ -46,6 +46,10 @@
   .ask-row input { flex:1; min-width:0; }
   .ask-row button { padding:0 16px; border:0; border-radius:9px; background:#2f6fd0; color:#fff; font-weight:700; }
   .ask-answer { margin-top:10px; padding:10px; border-left:3px solid #6da8ff; background:#0c1220; color:var(--ink); line-height:1.5; }
+  .ask-panel { margin-top:10px; border:1px solid var(--line); border-radius:8px; background:#101827; }
+  .ask-panel summary { cursor:pointer; padding:9px 10px; color:#c9d4ea; font-size:.9rem; font-weight:700; }
+  .ask-panel[open] summary { border-bottom:1px solid var(--line); }
+  .ask-panel-content { padding:0 10px 10px; }
 </style>
 </head>
 <body>
@@ -187,6 +191,7 @@ async function chartCard(ticker, selectedPeriod = "3mo", selectedInterval = "4h"
       <select id="chartInterval"><option value="1m" ${interval === "1m" ? "selected" : ""}>1 minute</option><option value="5m" ${interval === "5m" ? "selected" : ""}>5 minutes</option><option value="15m" ${interval === "15m" ? "selected" : ""}>15 minutes</option><option value="30m" ${interval === "30m" ? "selected" : ""}>30 minutes</option><option value="1h" ${interval === "1h" ? "selected" : ""}>1 hour</option><option value="4h" ${interval === "4h" ? "selected" : ""}>4 hours</option><option value="1d" ${interval === "1d" ? "selected" : ""}>1 day</option></select>
       <select id="chartPeriod"><option value="1d" ${period === "1d" ? "selected" : ""}>1 day</option><option value="5d" ${period === "5d" ? "selected" : ""}>5 days</option><option value="10d" ${period === "10d" ? "selected" : ""}>10 days</option><option value="1mo" ${period === "1mo" ? "selected" : ""}>1 month</option><option value="3mo" ${period === "3mo" ? "selected" : ""}>3 months</option><option value="6mo" ${period === "6mo" ? "selected" : ""}>6 months</option><option value="9mo" ${period === "9mo" ? "selected" : ""}>9 months</option><option value="1y" ${period === "1y" ? "selected" : ""}>1 year</option><option value="2y" ${period === "2y" ? "selected" : ""}>2 years</option></select>
     </div></div>
+    ${askCard(ticker)}
     <div class="legend"><span style="color:#e0a83c">EMA20</span> · <span style="color:#6da8ff">EMA50</span> · <span style="color:#55d6be">A/D line</span> · <span style="color:#e0a83c">CMF20</span> · RSI ${d.rsi == null ? "n/a" : d.rsi.toFixed(0)}</div>
     <div class="chart-wrap"><canvas id="priceChart"></canvas><div id="candleTooltip" class="candle-tooltip" role="status"></div></div>
     <div class="meta">${esc(levelText)} · ${esc(d.interval)} candles over ${esc(d.period)} · Click a candle for details · Scroll to zoom; drag to pan. · ${esc(d.insight)} · ${esc(d.as_of)}</div>
@@ -194,7 +199,7 @@ async function chartCard(ticker, selectedPeriod = "3mo", selectedInterval = "4h"
 }
 
 function askCard(ticker) {
-  return `<div class="card sec"><h3>Ask about this chart</h3><div class="ask-row"><input id="chartQuestion" type="text" placeholder="e.g. What phase is the latest candle?" autocomplete="off"><button id="askButton">Ask</button></div><div id="askAnswer" class="ask-answer" role="status">Ask about phase, entry, support, resistance, RSI, trend, CMF, or the latest candle.</div></div>`;
+  return `<details class="ask-panel"><summary>Ask about this chart</summary><div class="ask-panel-content"><div class="ask-row"><input id="chartQuestion" type="text" placeholder="e.g. What phase is the latest candle?" autocomplete="off"><button id="askButton">Ask</button></div><div id="askAnswer" class="ask-answer" role="status">Ask about phase, entry, support, resistance, RSI, trend, CMF, or the latest candle.</div></div></details>`;
 }
 
 async function askQuestion(ticker) {
@@ -247,7 +252,6 @@ async function run() {
     }
     html += list("Risk manager — fired checks", [...(rk.blockers||[]).map(b=>"⛔ "+b), ...(rk.warnings||[]).map(w=>"⚠️ "+w)]);
     html += sec("Risk manager verdict", esc(rk.summary));
-    html += askCard(ticker);
     html += `<div class="foot">${esc(d.data_note)}</div>`;
     out.innerHTML = html;
     document.getElementById("chartPeriod")?.addEventListener("change", () => { chartStart = 0; chartEnd = 0; run(); });
