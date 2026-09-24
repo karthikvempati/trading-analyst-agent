@@ -725,6 +725,13 @@ def indicator_series(values: list[float], window: int) -> list[Optional[float]]:
     return result
 
 
+def rolling_average_series(values: list[float], window: int) -> list[Optional[float]]:
+    result: list[Optional[float]] = [None] * len(values)
+    for index in range(window - 1, len(values)):
+        result[index] = sum(values[index - window + 1:index + 1]) / window
+    return result
+
+
 def accumulation_distribution(hist: dict[str, Any]) -> list[float]:
     """Return the cumulative Chaikin Accumulation/Distribution Line."""
     total = 0.0
@@ -813,6 +820,7 @@ def chart_payload(ticker: str, period: str = "3mo", interval: str = "4h") -> dic
     ema50 = indicator_series(close_window, 50)
     ad_line = accumulation_distribution(hist)[-history_bars:]
     cmf20 = chaikin_money_flow(hist)[-history_bars:]
+    volume_avg20 = rolling_average_series(hist["volumes"], 20)[-history_bars:]
     phases = market_phases(close_window, ema20, ema50, ad_line, cmf20)
     support = min(hist["lows"][-20:])
     resistance = max(hist["highs"][-20:])
@@ -836,7 +844,13 @@ def chart_payload(ticker: str, period: str = "3mo", interval: str = "4h") -> dic
         ema50 = ema50[-view_bars:]
         ad_line = ad_line[-view_bars:]
         cmf20 = cmf20[-view_bars:]
+        volume_avg20 = volume_avg20[-view_bars:]
         phases = phases[-view_bars:]
+    current_volume = candles[-1]["volumes"]
+    average_volume = volume_avg20[-1]
+    volume_ratio = current_volume / average_volume if average_volume else None
+    insight += (f" Current volume is {volume_ratio:.1f}x its 20-bar average."
+                if volume_ratio else " 20-bar average volume is unavailable.")
     levels = {"buy_entry": support, "sell_entry": resistance,
               "best_entry": support, "entry_trigger": resistance,
               "support": support, "resistance": resistance,
@@ -845,7 +859,8 @@ def chart_payload(ticker: str, period: str = "3mo", interval: str = "4h") -> dic
               "method": "Best entry is the primary support retest; entry trigger is a breakout above primary resistance."}
     return {"ticker": ticker, "period": requested_period, "source_period": source_period, "interval": interval,
             "candles": candles, "ema20": ema20, "ema50": ema50,
-            "ad_line": ad_line, "cmf20": cmf20, "rsi": rsi_value,
+            "ad_line": ad_line, "cmf20": cmf20, "volume_avg20": volume_avg20,
+            "volume_ratio": volume_ratio, "rsi": rsi_value,
             "phases": phases, "levels": levels, "insight": insight, "as_of": now_iso()}
 
 

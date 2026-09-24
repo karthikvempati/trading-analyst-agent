@@ -30,7 +30,7 @@
   ul { margin:6px 0; padding-left:20px; font-size:0.9rem; }
   li { margin:3px 0; }
   .foot { text-align:center; color:var(--dim); font-size:0.72rem; margin:22px 0; }
-  .chart-wrap { position:relative; width:100%; height:430px; margin-top:10px; }
+  .chart-wrap { position:relative; width:100%; height:470px; margin-top:10px; }
   .chart-wrap canvas { width:100%; height:100%; display:block; }
   .chart-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; }
   .chart-toolbar select { width:auto; padding:7px 9px; font-size:.85rem; }
@@ -108,8 +108,9 @@ function drawChart(data) {
   activeChartData = data;
   if (!chartEnd || chartEnd > data.candles.length) { chartStart = 0; chartEnd = data.candles.length; }
   const candles = data.candles.slice(chartStart, chartEnd), pad = {left:44, right:8, top:12, bottom:28};
-  const chartW = width - pad.left - pad.right, priceH = height * .58 - pad.top;
-  const flowTop = pad.top + priceH + 28, flowH = height - flowTop - pad.bottom;
+  const chartW = width - pad.left - pad.right, priceH = height * .46 - pad.top;
+  const flowTop = pad.top + priceH + 24, flowH = height * .22;
+  const volumeTop = flowTop + flowH + 26, volumeH = height - volumeTop - pad.bottom;
   const prices = candles.flatMap(c => [c.highs, c.lows]);
   const levelValues = Object.values(data.levels || {}).filter(value => typeof value === "number");
   const max = Math.max(...prices, ...levelValues), min = Math.min(...prices, ...levelValues), range = max - min || 1;
@@ -144,8 +145,8 @@ function drawChart(data) {
     ctx.fillStyle = color; ctx.fillText(`${label} $${value.toFixed(2)}`, Math.max(pad.left, width - 150), levelY - 3);
   });
   ctx.strokeStyle = "#2a3550"; ctx.beginPath(); ctx.moveTo(pad.left, flowTop); ctx.lineTo(width - pad.right, flowTop); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad.left, volumeTop); ctx.lineTo(width - pad.right, volumeTop); ctx.stroke();
   const maxVolume = Math.max(...candles.map(c => c.volumes || 0), 1);
-  candles.forEach((c, i) => { const barH = (c.volumes || 0) / maxVolume * flowH * .35; ctx.fillStyle = "rgba(154,166,189,.22)"; ctx.fillRect(x(i) - candleW / 2, flowTop + flowH - barH, candleW, barH); });
   const ad = data.ad_line.slice(chartStart, chartEnd), adMin = Math.min(...ad), adMax = Math.max(...ad), adRange = adMax - adMin || 1;
   const cmf = data.cmf20.slice(chartStart, chartEnd);
   function flowY(value, low, high) { return flowTop + (high - value) / (high - low || 1) * flowH; }
@@ -154,14 +155,25 @@ function drawChart(data) {
   ctx.strokeStyle = "#e0a83c"; ctx.beginPath(); let cmfStarted = false;
   cmf.forEach((value, i) => { if (value == null) return; const pointY = flowY(value, -1, 1); if (!cmfStarted) { ctx.moveTo(x(i), pointY); cmfStarted = true; } else ctx.lineTo(x(i), pointY); }); ctx.stroke();
   ctx.strokeStyle = "rgba(224,168,60,.45)"; ctx.beginPath(); ctx.moveTo(pad.left, flowY(0, -1, 1)); ctx.lineTo(width - pad.right, flowY(0, -1, 1)); ctx.stroke();
-  ctx.fillStyle = "#9aa6bd"; ctx.fillText("A/D", pad.left, flowTop + 12); ctx.fillText("CMF", pad.left + 30, flowTop + 12);
+  for (let i = 1; i <= 2; i++) {
+    const volumeY = volumeTop + volumeH - i * volumeH / 2;
+    ctx.strokeStyle = "#2a3550"; ctx.beginPath(); ctx.moveTo(pad.left, volumeY); ctx.lineTo(width - pad.right, volumeY); ctx.stroke();
+    ctx.fillStyle = "#9aa6bd"; ctx.fillText(`${(maxVolume * i / 2 / 1000000).toFixed(1)}M`, 3, volumeY + 4);
+  }
+  candles.forEach((c, i) => { const barH = (c.volumes || 0) / maxVolume * volumeH; ctx.fillStyle = c.closes >= c.opens ? "rgba(47,191,113,.65)" : "rgba(224,82,82,.65)"; ctx.fillRect(x(i) - candleW / 2, volumeTop + volumeH - barH, candleW, barH); });
+  const avgVolume = data.volume_avg20.slice(chartStart, chartEnd);
+  const volumeScale = volumeH / maxVolume;
+  ctx.strokeStyle = "#f5d76e"; ctx.lineWidth = 1.5; ctx.beginPath(); let volumeAverageStarted = false;
+  avgVolume.forEach((value, i) => { if (value == null) return; const pointY = volumeTop + volumeH - value * volumeScale; if (!volumeAverageStarted) { ctx.moveTo(x(i), pointY); volumeAverageStarted = true; } else ctx.lineTo(x(i), pointY); }); ctx.stroke();
+  ctx.fillStyle = "#9aa6bd"; ctx.fillText("A/D", pad.left, flowTop + 12); ctx.fillText("CMF", pad.left + 30, flowTop + 12); ctx.fillText("Volume · 20-bar average", pad.left, volumeTop + 14);
   ctx.fillText(candles[0].dates, pad.left, height - 8); ctx.fillText(candles[candles.length - 1].dates, width - 76, height - 8);
   const tooltip = document.getElementById("candleTooltip");
   const tooltipHtml = candle => {
     const index = data.candles.indexOf(candle), previous = data.candles[index - 1];
     const change = previous ? (candle.closes - previous.closes) / previous.closes * 100 : null;
     const fmt = value => value == null ? "n/a" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 2});
-    return `<strong>${esc(candle.dates)}</strong> · ${candle.closes >= candle.opens ? "up" : "down"}${change == null ? "" : ` ${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}<br>Phase <strong>${esc(data.phases?.[index] || "n/a")}</strong><br>O <strong>$${fmt(candle.opens)}</strong> · H <strong>$${fmt(candle.highs)}</strong> · L <strong>$${fmt(candle.lows)}</strong> · C <strong>$${fmt(candle.closes)}</strong><br>Range <strong>$${fmt(candle.highs - candle.lows)}</strong> · Vol <strong>${fmt(candle.volumes)}</strong><br>EMA20 <strong>${fmt(data.ema20[index])}</strong> · EMA50 <strong>${fmt(data.ema50[index])}</strong><br>A/D <strong>${fmt(data.ad_line[index])}</strong> · CMF20 <strong>${fmt(data.cmf20[index])}</strong>`;
+    const average = data.volume_avg20[index], ratio = average ? candle.volumes / average : null;
+    return `<strong>${esc(candle.dates)}</strong> · ${candle.closes >= candle.opens ? "up" : "down"}${change == null ? "" : ` ${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}<br>Phase <strong>${esc(data.phases?.[index] || "n/a")}</strong><br>O <strong>$${fmt(candle.opens)}</strong> · H <strong>$${fmt(candle.highs)}</strong> · L <strong>$${fmt(candle.lows)}</strong> · C <strong>$${fmt(candle.closes)}</strong><br>Volume <strong>${fmt(candle.volumes)}</strong> · 20-bar avg <strong>${fmt(average)}</strong> · comparison <strong>${ratio == null ? "n/a" : ratio.toFixed(1) + "x"}</strong><br>EMA20 <strong>${fmt(data.ema20[index])}</strong> · EMA50 <strong>${fmt(data.ema50[index])}</strong><br>A/D <strong>${fmt(data.ad_line[index])}</strong> · CMF20 <strong>${fmt(data.cmf20[index])}</strong>`;
   };
   const showTooltip = e => {
     if (!tooltip) return;
